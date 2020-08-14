@@ -4,6 +4,9 @@ from sqlalchemy import create_engine
 import time
 import random
 
+from stem import Signal
+from stem.control import Controller
+
 BASE = "https://www.azlyrics.com/"
 ARTIST_URL = BASE + "g/guidedbyvoices.html"
 
@@ -15,6 +18,7 @@ INSERT_STATEMENT = "INSERT INTO songs (title, lyrics) VALUES (E\'{}\', E\'{}\');
 engine = create_engine(DATABASE_URI)
 
 SCRAPE_RETRIES_AMOUNT = 5
+SCRAPE_PROXY = 'socks5://127.0.0.1:9050'
 
 headers_list = [
     { "Accept": "text/html", "Accept-Encoding": "gzip, deflate, br", "Accept-Language": "en-US,en;q=0.9", "Host": "www.azlyrics.com", "Referer": "google.com", "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "cross-site", "Sec-Fetch-User": "?1", "Upgrade-Insecure-Requests": "1", "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.89 Safari/537.36", "X-Amzn-Trace-Id": "Root=1-5f327f4c-6ca8b970f09beea0d0b56b90" },
@@ -28,10 +32,14 @@ def song_url(song_path):
 # need to try with tor for new ip addresses...
 def fetch_song_lyrics(song_path):
     for i in range(0, SCRAPE_RETRIES_AMOUNT):
-        time.sleep(random.randint(1,15))
+        time.sleep(random.randint(1,5))
         try:
+            with Controller.from_port(port=9051) as c:
+                c.authenticate()
+                c.signal(Signal.NEWNYM)
+            proxies = {'http': SCRAPE_PROXY, 'https': SCRAPE_PROXY}
             headers = random.choice(headers_list)
-            song_page_response = requests.get(song_url(song_path), headers=headers)
+            song_page_response = requests.get(song_url(song_path), proxies=proxies, headers=headers)
             assert song_page_response.ok
             song_soup = BeautifulSoup(song_page_response.content, 'html.parser')
             lyrics_section = song_soup.find('div', class_='ringtone').find_next_sibling('div')
@@ -56,7 +64,7 @@ album_list = artist_soup.find(id='listAlbum')
 song_elements = album_list.find_all('div', class_='listalbum-item')
 
 # iterate over songs
-for song in song_elements:
+for song in song_elements[0:5]:
     title = song.get_text().replace("'", "\\'")
     lyrics = fetch_song_lyrics(song.find('a')['href'])
     engine.execute(INSERT_STATEMENT.format(title, lyrics))
